@@ -1,22 +1,26 @@
-# Imagen de la API del restaurante
-FROM python:3.12-slim AS base
+# Imagen de la API del restaurante (construcción en dos etapas)
 
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+# --- Etapa 1: instalar dependencias en un entorno virtual
+FROM python:3.12-slim AS build
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+COPY requirements.txt .
+# pip, setuptools y wheel no se necesitan en ejecución: se quitan del entorno final
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip uninstall -y pip setuptools wheel
+
+# --- Etapa 2: imagen final mínima, sin herramientas de instalación
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH"
 WORKDIR /srv
 
-# Parches de seguridad del sistema base y herramientas de empaquetado actualizadas
+# Parches de seguridad del sistema base y eliminación de pip/setuptools del Python global
 RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir --upgrade pip \
-    && pip uninstall -y setuptools wheel || true
+    && python -m pip uninstall -y pip setuptools wheel || true
 
-# setuptools y wheel no se necesitan en tiempo de ejecución; se eliminan para reducir la superficie de ataque
-RUN find / -path /proc -prune -o \( -name "setuptools*" -o -name "wheel-*" \) -print -exec rm -rf {} + 2>/dev/null || true
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
+COPY --from=build /opt/venv /opt/venv
 COPY app ./app
 
 # Se ejecuta con un usuario sin privilegios
