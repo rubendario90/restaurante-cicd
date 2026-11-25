@@ -82,8 +82,22 @@ jobs:
         run: docker build -t $IMAGE:${{ github.sha }} -t $IMAGE:latest .
       - name: Escanear imagen (Trivy)
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.57.1 \
-            image --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 $IMAGE:${{ github.sha }}
+          # Se escanea la imagen exportada como archivo (no depende de la versión del daemon Docker)
+          docker save $IMAGE:${{ github.sha }} -o imagen.tar
+          docker run --rm -v "$PWD:/work" aquasec/trivy:0.57.1 image --input /work/imagen.tar \
+            --severity CRITICAL,HIGH --ignore-unfixed --format json --output /work/trivy.json \
+            2> trivy.err || { echo "::error title=Trivy no pudo ejecutarse::$(tail -c 800 trivy.err | tr '\n' ' ')"; exit 1; }
+          # Cada hallazgo se publica como anotación y bloquea el pipeline
+          python3 - <<'EOF'
+          import json, sys
+          vulns = [(r.get("Target"), v) for r in json.load(open("trivy.json")).get("Results", [])
+                   for v in r.get("Vulnerabilities") or []]
+          for target, v in vulns[:10]:
+              print(f"::error title=Trivy {v['Severity']}::{v['VulnerabilityID']} en {v['PkgName']} "
+                    f"{v['InstalledVersion']} -> {v.get('FixedVersion')} ({target})")
+          print(f"Vulnerabilidades CRITICAL/HIGH con corrección: {len(vulns)}")
+          sys.exit(1 if vulns else 0)
+          EOF
       - name: Publicar en el registro
         if: github.event_name == 'push'
         run: |
