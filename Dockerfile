@@ -8,7 +8,11 @@ WORKDIR /srv
 RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir --upgrade pip setuptools wheel
+    && pip install --no-cache-dir --upgrade pip \
+    && pip uninstall -y setuptools wheel || true
+
+# setuptools y wheel no se necesitan en tiempo de ejecución; se eliminan para reducir la superficie de ataque
+RUN find / -path /proc -prune -o \( -name "setuptools*" -o -name "wheel-*" \) -print -exec rm -rf {} + 2>/dev/null || true
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

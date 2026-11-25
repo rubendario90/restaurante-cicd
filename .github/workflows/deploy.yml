@@ -94,7 +94,7 @@ jobs:
                    for v in r.get("Vulnerabilities") or []]
           for target, v in vulns[:10]:
               print(f"::error title=Trivy {v['Severity']}::{v['VulnerabilityID']} en {v['PkgName']} "
-                    f"{v['InstalledVersion']} -> {v.get('FixedVersion')} ({target})")
+                    f"{v['InstalledVersion']} -> {v.get('FixedVersion')} ({target}: {v.get('PkgPath', '')})")
           print(f"Vulnerabilidades CRITICAL/HIGH con corrección: {len(vulns)}")
           sys.exit(1 if vulns else 0)
           EOF
