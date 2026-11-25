@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const {
   Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell,
-  WidthType, ShadingType, BorderStyle, ImageRun, Footer, Header, PageNumber, LevelFormat, PageBreak,
+  WidthType, ShadingType, BorderStyle, ImageRun, Footer, Header, PageNumber, LevelFormat, PageBreak, ExternalHyperlink,
 } = require("docx");
 
 // Uso: npm install docx && node scripts/generar_documento.js
@@ -19,12 +19,13 @@ const W = 9360; // ancho útil (Carta, márgenes de 1")
 function runs(text, base = {}) {
   // **negrita** y `código`
   const out = [];
-  const re = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  const re = /(\*\*[^*]+\*\*|`[^`]+`|https?:\/\/[^\s)]*[^\s).,;:])/g;
   let last = 0, m;
   while ((m = re.exec(text))) {
     if (m.index > last) out.push(new TextRun({ text: text.slice(last, m.index), ...base }));
     const t = m[0];
-    if (t.startsWith("**")) out.push(new TextRun({ text: t.slice(2, -2), bold: true, ...base }));
+    if (t.startsWith("http")) out.push(new ExternalHyperlink({ link: t, children: [new TextRun({ text: t, color: "1155CC", underline: {}, ...base })] }));
+    else if (t.startsWith("**")) out.push(new TextRun({ text: t.slice(2, -2), bold: true, ...base }));
     else out.push(new TextRun({ text: t.slice(1, -1), font: MONO, size: 20, ...base }));
     last = m.index + t.length;
   }
@@ -137,19 +138,17 @@ jobs:
       - run: >                             # escaneo: falla si hay CRITICAL/HIGH
           docker run aquasec/trivy:0.57.1 image --ignore-unfixed
           --severity CRITICAL,HIGH --exit-code 1 $IMAGE:\${{ github.sha }}
-      - run: docker push $IMAGE:\${{ github.sha }}
+      - uses: actions/upload-artifact@v4   # la imagen probada pasa a staging
   deploy-staging:                          # 5. Staging + humo + carga
     needs: package
     environment: staging
     steps:
-      - run: >                             # credenciales del registro (secreto)
-          echo "\${{ secrets.GITHUB_TOKEN }}" |
-          docker login ghcr.io -u \${{ github.actor }} --password-stdin
-      - run: IMAGE_TAG=\${{ github.sha }} docker compose -f docker-compose.staging.yml up -d
+      - uses: actions/download-artifact@v4 # misma imagen escaneada en la etapa 4
+      - run: docker load -i imagen.tar && IMAGE_TAG=\${{ github.sha }} docker compose -f docker-compose.staging.yml up -d
       - run: curl -fs --retry 10 http://localhost:8000/health
       - run: python tests/performance/prueba_carga.py --url http://localhost:8000 --p95-max-ms 300
       - if: failure()                      # rollback automático
-        run: IMAGE_TAG=stable docker compose -f docker-compose.staging.yml up -d
+        run: docker compose -f docker-compose.staging.yml down
   deploy-production:                       # 6-7. Aprobación manual + blue-green
     needs: deploy-staging
     if: github.ref == 'refs/heads/main'
@@ -183,7 +182,7 @@ const cuerpo = [
   H1("1. Introducción"),
   H2("1.1 Contexto del sistema de restaurante"),
   P("El sistema objeto de este proyecto es una aplicación web (API REST) para la gestión de pedidos y reservas de un restaurante. Permite a los clientes registrarse e iniciar sesión, consultar la disponibilidad de mesas por fecha y turno, realizar reservas, consultar el menú, hacer pedidos en línea y recibir confirmaciones automáticas. El personal del restaurante actualiza el estado de los pedidos y consulta reportes de operación (reservas, pedidos, ingresos y plato más vendido)."),
-  P("Para que el proyecto no se quedara en el papel, el sistema se implementó de forma funcional en Python con el framework **FastAPI**, junto con 22 pruebas automatizadas y los archivos reales del pipeline (`.github/workflows/deploy.yml`, `Jenkinsfile`, `Dockerfile`). Todo el código está en la carpeta `restaurante-cicd/` que acompaña este documento."),
+  P("Para que el proyecto no se quedara en el papel, el sistema se implementó de forma funcional en Python con el framework **FastAPI**, junto con 22 pruebas automatizadas y los archivos reales del pipeline (`.github/workflows/deploy.yml`, `Jenkinsfile`, `Dockerfile`). El código fuente, las pruebas, la configuración del pipeline y las evidencias están publicados en el repositorio https://github.com/rubendario90/restaurante-cicd, donde el workflow se ejecuta automáticamente con cada push y su historial puede consultarse en la pestaña **Actions**.", { alignment: AlignmentType.LEFT }),
   H2("1.2 Justificación de un pipeline automatizado"),
   P("En un restaurante, un error en producción tiene un costo inmediato: una reserva duplicada deja a un cliente sin mesa, un total mal calculado genera pérdidas o reclamos y una caída del servicio en hora pico detiene los pedidos en línea. Si la compilación, las pruebas y el despliegue se hacen a mano, dependen de que alguien recuerde ejecutarlos y lo haga siempre igual. Un pipeline CI/CD resuelve esto porque:"),
   B("**Detecta errores temprano:** cada cambio se compila y se prueba automáticamente antes de integrarse a la rama principal."),
@@ -231,7 +230,7 @@ const cuerpo = [
     ["2", "Build y lint", "Instala dependencias, revisa el estilo con flake8 y verifica que todo compile.", "Cero errores de lint y de compilación."],
     ["3a", "Pruebas", "Ejecuta las 22 pruebas con pytest y mide cobertura; publica reportes JUnit y XML.", "100 % de pruebas exitosas y cobertura ≥ 80 %."],
     ["3b", "Seguridad", "Análisis estático (Bandit) y auditoría de dependencias (pip-audit). Corre en paralelo con 3a.", "Sin hallazgos de severidad media o alta."],
-    ["4", "Empaquetado", "Construye la imagen Docker, la escanea con Trivy y la publica en el registro.", "Sin vulnerabilidades CRITICAL/HIGH."],
+    ["4", "Empaquetado", "Construye la imagen Docker, la escanea con Trivy y la entrega a staging como artefacto (publicación en GHCR opcional).", "Sin vulnerabilidades CRITICAL/HIGH."],
     ["5", "Staging", "Levanta la imagen con Docker Compose, ejecuta la prueba de humo y la de carga.", "`/health` responde 200 y p95 < 300 ms sin errores 5xx."],
     ["6", "Aprobación", "Un responsable autoriza el paso a producción (solo desde `main`).", "Aprobación registrada."],
     ["7", "Producción", "Despliegue blue-green: se publica en el entorno inactivo y se cambia el tráfico.", "Monitoreo sin alertas; si falla, se revierte el tráfico."],
@@ -254,18 +253,18 @@ const cuerpo = [
   IMGP("diagrama_pipeline.png", 6.5),
   CAP("Figura 1. Diagrama del pipeline CI/CD completo, con la ruta de fallo"),
   H2("3.4 Archivo de configuración"),
-  P("A continuación se presenta una versión resumida del archivo `.github/workflows/deploy.yml`. El archivo completo y el `Jenkinsfile` equivalente se entregan en la carpeta del proyecto."),
+  P("A continuación se presenta una versión resumida del archivo `.github/workflows/deploy.yml`. El archivo completo y el `Jenkinsfile` equivalente pueden consultarse en el repositorio del proyecto (https://github.com/rubendario90/restaurante-cicd), en las rutas `.github/workflows/deploy.yml` y `Jenkinsfile`."),
   ...CODE(YAML),
 
   H1("4. Simulación de la ejecución del pipeline"),
   H2("4.1 Cómo se simuló"),
-  P("Como no se contaba con un repositorio remoto ni con Docker instalado en el equipo de trabajo, se construyó el script `scripts/simular_pipeline.py`, que reproduce localmente las mismas etapas del workflow con las herramientas reales (flake8, pytest, Bandit, Uvicorn). Para cada ejecución el script:"),
+  P("El workflow se ejecuta en GitHub Actions con cada push al repositorio. Sin embargo, para provocar fallos controlados sin alterar la rama principal, se construyó el script `scripts/simular_pipeline.py` (incluido en el repositorio), que reproduce localmente las mismas etapas del workflow con las herramientas reales (flake8, pytest, Bandit, Uvicorn). Para cada ejecución el script:"),
   N("Copia el proyecto a una carpeta temporal, que hace las veces de agente de CI limpio."),
   N("Opcionalmente aplica un “commit defectuoso” para provocar un fallo controlado."),
   N("Ejecuta las etapas en orden; si una falla, marca las siguientes como **OMITIDA** y bloquea el despliegue."),
   N("En la etapa de staging levanta la API con Uvicorn, hace la prueba de humo a `/health` y lanza 500 peticiones concurrentes."),
   N("Guarda el registro completo en `evidencias/pipeline_<escenario>.log`."),
-  P("La etapa de empaquetado es la única simulada: al no haber Docker, se valida la existencia del `Dockerfile` y se genera el artefacto `dist/restaurante-api.zip`. En GitHub Actions esta etapa ejecuta `docker build` y Trivy de verdad."),
+  P("En la ejecución local, la etapa de empaquetado es la única simulada: como el equipo de trabajo no tiene Docker instalado, se valida la existencia del `Dockerfile` y se genera el artefacto `dist/restaurante-api.zip`. En GitHub Actions esta etapa ejecuta `docker build` y Trivy de verdad."),
   ...CODE(`$ python scripts/simular_pipeline.py                      # camino feliz
 $ python scripts/simular_pipeline.py --fallo pruebas      # bug en el cálculo del total
 $ python scripts/simular_pipeline.py --fallo seguridad    # hash MD5 en autenticación
@@ -296,11 +295,11 @@ $ python scripts/simular_pipeline.py --fallo rendimiento  # consulta lenta de di
   P("**Fallo 3 – Rendimiento.** Se simuló una consulta de disponibilidad sin optimizar que tarda unos 400 ms. Todas las etapas anteriores pasan, pero en staging la prueba de carga mide un p95 de 478,2 ms, por encima del umbral de 300 ms, y el despliegue se bloquea."),
   IMGP("consola_fallo_rendimiento.png", 6.2),
   CAP("Figura 6. La prueba de carga en staging detecta la degradación de rendimiento"),
-  P("**Corrección:** perfilar el endpoint, indexar o cachear la consulta de mesas ocupadas por fecha y turno, y volver a ejecutar la prueba de carga. Mientras tanto, el paso `if: failure()` del workflow restaura en staging la imagen etiquetada como `stable`."),
+  P("**Corrección:** perfilar el endpoint, indexar o cachear la consulta de mesas ocupadas por fecha y turno, y volver a ejecutar la prueba de carga. Mientras tanto, el paso `if: failure()` del workflow retira de staging la versión defectuosa, de modo que en producción sigue la versión estable."),
   TABLA(["Escenario", "Etapa que falla", "Detectado por", "Efecto en el pipeline"], [
     ["Bug en cálculo del total", "2. Pruebas", "pytest (2 de 22 fallan)", "Etapas 3 a 5 omitidas; sin despliegue."],
     ["Hash MD5 en contraseñas", "3. Seguridad", "Bandit B324 (alta)", "Etapas 4 y 5 omitidas; sin despliegue."],
-    ["Consulta lenta", "5. Staging", "Prueba de carga (p95 478 ms)", "Despliegue bloqueado; rollback a `stable`."],
+    ["Consulta lenta", "5. Staging", "Prueba de carga (p95 478 ms)", "Despliegue bloqueado; versión retirada de staging."],
   ], [2.4, 1.6, 2.6, 3.0]),
   CAPT("Tabla 7. Resumen de los fallos simulados"),
 
