@@ -1,0 +1,9 @@
+# Entorno de staging
+services:
+  api:
+    image: ${IMAGE:-restaurante-api}:${IMAGE_TAG:-latest}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    environment:
+      - ENTORNO=staging

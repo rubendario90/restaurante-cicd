@@ -1,0 +1,135 @@
+# Pipeline CI/CD - Sistema de pedidos y reservas del restaurante
+name: CI-CD Restaurante
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/restaurante-api
+  PYTHON_VERSION: "3.10"
+
+jobs:
+  # 1. Construcción y análisis estático
+  build:
+    name: Build y análisis estático
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev.txt
+      - name: Lint (flake8)
+        run: flake8 app tests
+      - name: Verificar que compila
+        run: python -m compileall -q app
+
+  # 2. Pruebas unitarias e integración, con umbral de cobertura
+  test:
+    name: Pruebas automatizadas
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Pytest + cobertura (mínimo 80 %)
+        run: pytest --cov=app --cov-report=xml --cov-fail-under=80 --junitxml=reporte-pruebas.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reportes-pruebas
+          path: |
+            reporte-pruebas.xml
+            coverage.xml
+
+  # 3. Validación de seguridad (SAST + dependencias)
+  security:
+    name: Seguridad
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -r requirements-dev.txt
+      - name: Análisis estático de seguridad (Bandit)
+        run: bandit -r app -ll
+      - name: Vulnerabilidades en dependencias (pip-audit)
+        run: pip-audit -r requirements.txt
+
+  # 4. Empaquetado en Docker y escaneo de la imagen
+  package:
+    name: Empaquetado Docker
+    needs: [test, security]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Construir imagen
+        run: docker build -t $IMAGE:${{ github.sha }} -t $IMAGE:latest .
+      - name: Escanear imagen (Trivy)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.57.1 \
+            image --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 $IMAGE:${{ github.sha }}
+      - name: Publicar en el registro
+        if: github.event_name == 'push'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker push $IMAGE:${{ github.sha }}
+          docker push $IMAGE:latest
+
+  # 5. Despliegue a staging + pruebas de humo y de rendimiento
+  deploy-staging:
+    name: Despliegue a staging
+    needs: package
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Autenticarse en el registro
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Levantar entorno de staging
+        run: IMAGE_TAG=${{ github.sha }} docker compose -f docker-compose.staging.yml up -d
+      - name: Prueba de humo (health check)
+        run: |
+          for i in $(seq 1 10); do
+            curl -fs http://localhost:8000/health && exit 0
+            sleep 3
+          done
+          exit 1
+      - name: Prueba de rendimiento (p95 < 300 ms)
+        run: |
+          pip install httpx
+          python tests/performance/prueba_carga.py --url http://localhost:8000 --peticiones 500 --p95-max-ms 300
+      - name: Rollback si falla
+        if: failure()
+        run: IMAGE_TAG=stable docker compose -f docker-compose.staging.yml up -d
+
+  # 6. Despliegue a producción con aprobación manual (solo main)
+  deploy-production:
+    name: Despliegue a producción
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production   # requiere aprobación de un revisor en GitHub
+    steps:
+      - name: Desplegar (estrategia blue-green simulada)
+        run: echo "Desplegando ${{ github.sha }} en el entorno green y cambiando el tráfico..."

@@ -1,0 +1,58 @@
+Pipeline CI/CD Restaurante - ejecución 2026-11-24 20:55:28
+Escenario: sin fallos (camino feliz)
+
+========== ETAPA: 1. Build y lint ==========
+$ python -m flake8 app tests
+$ python -m compileall -q app
+---> 1. Build y lint: OK (2.8 s)
+
+========== ETAPA: 2. Pruebas ==========
+$ python -m pytest -q --cov=app --cov-fail-under=80 --cov-report=term --junitxml=reporte-pruebas.xml
+......................                                                   [100%]
+- generated xml file: C:\Users\maric\AppData\Local\Temp\pipeline_l0_whwmv\reporte-pruebas.xml -
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.10.11-final-0 _______________
+
+Name                    Stmts   Miss  Cover
+-------------------------------------------
+app\__init__.py             1      0   100%
+app\auth.py                27      0   100%
+app\main.py                39      0   100%
+app\notificaciones.py       5      0   100%
+app\pedidos.py             37      0   100%
+app\reportes.py             9      0   100%
+app\reservas.py            31      0   100%
+-------------------------------------------
+TOTAL                     149      0   100%
+Required test coverage of 80% reached. Total coverage: 100.00%
+22 passed in 1.16s
+---> 2. Pruebas: OK (5.5 s)
+
+========== ETAPA: 3. Seguridad ==========
+$ python -m bandit -r app -ll -q
+---> 3. Seguridad: OK (1.0 s)
+
+========== ETAPA: 4. Empaquetado ==========
+$ docker build -t restaurante-api:local .
+[simulado] Docker no está instalado en este equipo; se valida el Dockerfile y se
+           empaqueta la aplicación como artefacto (dist/restaurante-api.zip).
+Artefacto generado: dist/restaurante-api.zip
+---> 4. Empaquetado: OK (0.1 s)
+
+========== ETAPA: 5. Despliegue a staging ==========
+$ uvicorn app.main:app --port 64853   (entorno de staging local)
+Prueba de humo GET /health -> 200 {"status":"ok","version":"1.0.0"}
+$ python tests/performance/prueba_carga.py --url http://127.0.0.1:64853 --peticiones 500 --p95-max-ms 300
+Peticiones: 500 | Concurrencia: 20
+Media: 88.5 ms | p95: 147.7 ms | Máx: 258.6 ms
+Errores 5xx: 0 | Umbral p95: 300.0 ms
+RESULTADO: criterio de rendimiento CUMPLIDO
+---> 5. Despliegue a staging: OK (7.1 s)
+
+================ RESUMEN ================
+1. Build y lint              OK         2.8 s
+2. Pruebas                   OK         5.5 s
+3. Seguridad                 OK         1.0 s
+4. Empaquetado               OK         0.1 s
+5. Despliegue a staging      OK         7.1 s
+PIPELINE: ÉXITO - versión lista para producción (requiere aprobación)

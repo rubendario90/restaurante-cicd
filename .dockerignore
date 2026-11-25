@@ -1,0 +1,8 @@
+.git
+.github
+tests
+evidencias
+scripts
+__pycache__
+*.pyc
+.coverage

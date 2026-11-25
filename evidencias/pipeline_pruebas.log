@@ -1,0 +1,71 @@
+Pipeline CI/CD Restaurante - ejecución 2026-11-24 20:55:45
+Escenario: pruebas
+[commit simulado] app/pedidos.py: 'total += MENU[item.plato] * item.cantidad' -> 'total += MENU[item.plato]'
+
+========== ETAPA: 1. Build y lint ==========
+$ python -m flake8 app tests
+$ python -m compileall -q app
+---> 1. Build y lint: OK (5.6 s)
+
+========== ETAPA: 2. Pruebas ==========
+$ python -m pytest -q --cov=app --cov-fail-under=80 --cov-report=term --junitxml=reporte-pruebas.xml
+......F......F........                                                   [100%]
+================================== FAILURES ===================================
+_______________________ test_crear_pedido_calcula_total _______________________
+
+client = <starlette.testclient.TestClient object at 0x000001FC9F8C65F0>
+headers = {'Authorization': 'Bearer 91b456d0a66d8b95bf529eede2bbc785'}
+
+    def test_crear_pedido_calcula_total(client, headers):
+        r = client.post("/pedidos", json=PEDIDO, headers=headers)
+        assert r.status_code == 201
+>       assert r.json()["total"] == 2 * 25000 + 2 * 7000
+E       assert 32000 == ((2 * 25000) + (2 * 7000))
+
+tests\test_pedidos.py:11: AssertionError
+___________________________ test_reporte_con_datos ____________________________
+
+client = <starlette.testclient.TestClient object at 0x000001FC9F8F4F70>
+headers = {'Authorization': 'Bearer 3d197b4f05875025d9347c14c8922daa'}
+manana = '2026-11-25'
+
+    def test_reporte_con_datos(client, headers, manana):
+        client.post("/reservas", json={"fecha": manana, "turno": "19:00", "personas": 2}, headers=headers)
+        client.post("/pedidos", json={"items": [{"plato": "sancocho", "cantidad": 3}]}, headers=headers)
+        client.post("/pedidos", json={"items": [{"plato": "ajiaco", "cantidad": 1}]}, headers=headers)
+        r = client.get("/reportes/resumen", headers=headers).json()
+        assert r["total_reservas"] == 1
+        assert r["total_pedidos"] == 2
+>       assert r["ingresos"] == 3 * 24000 + 25000
+E       assert 49000 == ((3 * 24000) + 25000)
+
+tests\test_reportes.py:17: AssertionError
+- generated xml file: C:\Users\maric\AppData\Local\Temp\pipeline_ayuxh_40\reporte-pruebas.xml -
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.10.11-final-0 _______________
+
+Name                    Stmts   Miss  Cover
+-------------------------------------------
+app\__init__.py             1      0   100%
+app\auth.py                27      0   100%
+app\main.py                39      0   100%
+app\notificaciones.py       5      0   100%
+app\pedidos.py             37      0   100%
+app\reportes.py             9      0   100%
+app\reservas.py            31      0   100%
+-------------------------------------------
+TOTAL                     149      0   100%
+Required test coverage of 80% reached. Total coverage: 100.00%
+=========================== short test summary info ===========================
+FAILED tests/test_pedidos.py::test_crear_pedido_calcula_total - assert 32000 ...
+FAILED tests/test_reportes.py::test_reporte_con_datos - assert 49000 == ((3 *...
+2 failed, 20 passed in 1.27s
+---> 2. Pruebas: FALLÓ (5.9 s)
+
+================ RESUMEN ================
+1. Build y lint              OK         5.6 s
+2. Pruebas                   FALLÓ      5.9 s
+3. Seguridad                 OMITIDA    0.0 s
+4. Empaquetado               OMITIDA    0.0 s
+5. Despliegue a staging      OMITIDA    0.0 s
+PIPELINE: FALLIDO - el despliegue se bloqueó; se mantiene la versión estable
