@@ -115,7 +115,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.10", cache: pip }
+        with: { python-version: "3.12", cache: pip }
       - run: pip install -r requirements-dev.txt
       - run: flake8 app tests
       - run: python -m compileall -q app
@@ -241,7 +241,7 @@ const cuerpo = [
   TABLA(["Necesidad", "Herramienta", "Uso en el pipeline"], [
     ["Control de versiones", "Git + GitHub", "Ramas, pull requests, revisión de código y disparo del pipeline."],
     ["Orquestación", "GitHub Actions (alternativa: Jenkins)", "Ejecuta las etapas; se incluye un `Jenkinsfile` equivalente."],
-    ["Lenguaje y framework", "Python 3.10, FastAPI, Uvicorn", "Implementación de la API del restaurante."],
+    ["Lenguaje y framework", "Python 3.12, FastAPI, Uvicorn", "Implementación de la API del restaurante."],
     ["Calidad de código", "flake8", "Estilo y errores comunes (líneas de máximo 120 caracteres)."],
     ["Pruebas", "pytest, pytest-cov, TestClient", "Pruebas unitarias e integración de la API; umbral de cobertura."],
     ["Seguridad", "Bandit, pip-audit, Trivy", "SAST, vulnerabilidades en dependencias y en la imagen."],

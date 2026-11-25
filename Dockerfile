@@ -1,8 +1,14 @@
 # Imagen de la API del restaurante
-FROM python:3.10-slim AS base
+FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /srv
+
+# Parches de seguridad del sistema base y herramientas de empaquetado actualizadas
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir --upgrade pip setuptools wheel
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
